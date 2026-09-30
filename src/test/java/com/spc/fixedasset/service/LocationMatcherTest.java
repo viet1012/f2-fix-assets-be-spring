@@ -69,6 +69,22 @@ class LocationMatcherTest {
     }
 
     @Test
+    void duplicateFacAAaRowsPreferAssetFloorThenLowestId() {
+        List<LocationMapRow> dup = List.of(
+                new LocationMapRow(7, "Fac_A", "PRESS", "1F", "D1", "D1-1", null, null),
+                new LocationMapRow(8, "Fac_A", "PRESS", "2F", "D1", "D1-1", null, null),
+                new LocationMapRow(9, "Fac_A", "PRESS", "2F", "D1", "D1-1", null, null),
+                new LocationMapRow(10, "Fac_A", "PRESS", "2F", "D1", null, null, null),
+                new LocationMapRow(11, "Fac_A", "PRESS", "1F", "D1", null, null, null));
+        assertEquals(8, LocationMatcher.match("D1", "D1-1", "PRESS", " 2f ", dup).row().id());
+        assertEquals(7, LocationMatcher.match("D1", "D1-1", "PRESS", "1F", dup).row().id());
+        assertEquals(7, LocationMatcher.match("D1", "D1-1", "PRESS", "3F", dup).row().id());
+        assertEquals(7, LocationMatcher.match("D1", "D1-1", "PRESS", null, dup).row().id());
+        assertEquals(11, LocationMatcher.match("D1", null, "PRESS", "1F", dup).row().id());
+        assertFalse(LocationMatcher.floorMismatch("2F", LocationMatcher.match("D1", "D1-1", "PRESS", "2F", dup)));
+    }
+
+    @Test
     void noMatchReturnsNone() {
         Match m = LocationMatcher.match("Z99", "Z99-1", "PRESS", MAP);
         assertEquals(MatchLevel.NONE, m.level());

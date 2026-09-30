@@ -46,8 +46,8 @@ class LocationControllerTest {
 
     @Test
     void assetsWithLocationReturnsMatchInfo() throws Exception {
-        when(service.getAssetsWithLocation("2", null)).thenReturn(List.of(sample()));
-        mvc.perform(get("/api/assets/with-location").param("factory", "2"))
+        when(service.getAssetsWithLocation("2", null, "Fac_A")).thenReturn(List.of(sample()));
+        mvc.perform(get("/api/assets/with-location").param("factory", "2").param("fac", "Fac_A"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].code").value("M001"))
                 .andExpect(jsonPath("$[0].currentZone").value("A15-3"))

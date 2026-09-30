@@ -26,10 +26,19 @@ public class LocationController {
         return service.getLocations(fac, div, floor, assetFactory);
     }
 
+    /**
+     * Assets with their matched MAP location.
+     *
+     * @param factory filters on the asset's {@code F2_FIXED_ASSET.Factory} (e.g. "Factory 2")
+     * @param div     filters on the asset's {@code F2_FIXED_ASSET.Div}
+     * @param fac     filters on {@code F2_FIXED_ASSET_MAP.Fac} of the matched row (e.g. "Fac_A"), not on the asset;
+     *                unmatched assets (matchLevel NONE) are left out when it is given
+     */
     @GetMapping("/assets/with-location")
     public List<AssetLocationResponse> getAssetsWithLocation(@RequestParam(required = false) String factory,
-                                                             @RequestParam(required = false) String div) {
-        return service.getAssetsWithLocation(factory, div);
+                                                             @RequestParam(required = false) String div,
+                                                             @RequestParam(required = false) String fac) {
+        return service.getAssetsWithLocation(factory, div, fac);
     }
 
     @GetMapping("/assets/{code}/location")

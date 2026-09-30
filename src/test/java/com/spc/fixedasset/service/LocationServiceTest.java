@@ -53,4 +53,24 @@ class LocationServiceTest {
         assertTrue(r.floorMismatch());
         assertEquals("1F", r.mapFloor());
     }
+
+    @Test
+    void assetsWithLocationFiltersOnMatchedMapFac() {
+        when(repo.findMapRows()).thenReturn(List.of(
+                new LocationMapRow(1, "Fac_A", "PRESS", "1F", "A15", "A15-3", null, null),
+                new LocationMapRow(2, "Fac_B", "PRESS", "1F", "B1", null, null, null)));
+        when(repo.findAssets("Factory 2", null)).thenReturn(List.of(
+                asset("M1", "A15", "A15-3", "1F"), asset("M2", "B1", null, "1F"), asset("M3", "Z9", null, "1F")));
+
+        assertEquals(List.of("M1", "M2", "M3"), codes(service.getAssetsWithLocation(" Factory 2 ", null, null)));
+        assertEquals(List.of("M1", "M2", "M3"), codes(service.getAssetsWithLocation("Factory 2", null, "  ")));
+        assertEquals(List.of("M1"), codes(service.getAssetsWithLocation("Factory 2", null, " fac_a ")));
+        assertEquals(List.of("M2"), codes(service.getAssetsWithLocation("Factory 2", null, "Fac_B")));
+        assertEquals(List.of(), codes(service.getAssetsWithLocation("Factory 2", null, "Fac_C")));
+        verify(repo, atLeastOnce()).findAssets("Factory 2", null);
+    }
+
+    private static List<String> codes(List<AssetLocationResponse> rows) {
+        return rows.stream().map(AssetLocationResponse::code).toList();
+    }
 }

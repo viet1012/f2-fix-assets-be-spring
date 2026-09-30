@@ -32,7 +32,7 @@ public class LocationService {
         List<LocationMapRow> rows = repository.findMapRows();
         Map<Long, Integer> direct = new HashMap<>();
         for (LocationAsset a : repository.findAssets(blankToNull(assetFactory), null)) {
-            Match m = match(a.positionA(), a.positionAA(), a.div(), rows);
+            Match m = match(a.positionA(), a.positionAA(), a.div(), a.floor(), rows);
             if (m.row() != null) direct.merge(m.row().id(), 1, Integer::sum);
         }
         return rows.stream()
@@ -43,11 +43,19 @@ public class LocationService {
                 .toList();
     }
 
+    /**
+     * @param factory exact filter on the asset's own {@code F2_FIXED_ASSET.Factory} (applied in SQL)
+     * @param div     exact filter on the asset's own {@code F2_FIXED_ASSET.Div} (applied in SQL)
+     * @param fac     filter on {@code F2_FIXED_ASSET_MAP.Fac} of the matched MAP row (e.g. "Fac_A"), applied after
+     *                matching, trim/case-insensitive; assets without a match (NONE) are excluded when it is set
+     */
     @Transactional(readOnly = true)
-    public List<AssetLocationResponse> getAssetsWithLocation(String factory, String div) {
+    public List<AssetLocationResponse> getAssetsWithLocation(String factory, String div, String fac) {
         List<LocationMapRow> rows = repository.findMapRows();
+        String f = blankToNull(fac);
         return repository.findAssets(blankToNull(factory), blankToNull(div)).stream()
                 .map(a -> toResponse(a, rows))
+                .filter(r -> f == null || (r.mapFac() != null && sameText(r.mapFac(), f)))
                 .toList();
     }
 
@@ -59,7 +67,7 @@ public class LocationService {
     }
 
     static AssetLocationResponse toResponse(LocationAsset a, List<LocationMapRow> rows) {
-        Match m = match(a.positionA(), a.positionAA(), a.div(), rows);
+        Match m = match(a.positionA(), a.positionAA(), a.div(), a.floor(), rows);
         LocationMapRow r = m.row();
         return new AssetLocationResponse(a.code(), a.name(), a.kind(), a.faType(), a.status(), a.div(), a.factory(), a.floor(),
                 normalize(a.positionA()), normalizeSub(a.positionA(), a.positionAA()),

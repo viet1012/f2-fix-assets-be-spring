@@ -36,16 +36,25 @@ public final class LocationMatcher {
         return naa != null && naa.equals(na) ? null : naa;
     }
 
-    /** Sub-zone first, then the major zone row (AA empty); same Div wins, then lowest Id. Floor is never used. */
+    /** Same as {@link #match(String, String, String, String, List)} without the asset floor (no floor tie-break). */
     public static Match match(String positionA, String positionAA, String div, List<LocationMapRow> rows) {
+        return match(positionA, positionAA, div, null, rows);
+    }
+
+    /**
+     * Sub-zone first, then the major zone row (AA empty). Floor never decides whether a row matches; among duplicate
+     * rows (same A/AA, e.g. repeated per Fac or Div) the same Div wins, then the row whose Floor equals the asset floor,
+     * then the lowest Id.
+     */
+    public static Match match(String positionA, String positionAA, String div, String floor, List<LocationMapRow> rows) {
         String a = normalize(positionA);
         if (a == null) return Match.NONE;
         String aa = normalizeSub(positionA, positionAA);
         if (aa != null) {
-            Optional<LocationMapRow> sub = best(rows, div, r -> a.equals(normalize(r.a())) && aa.equals(normalizeSub(r.a(), r.aa())));
+            Optional<LocationMapRow> sub = best(rows, div, floor, r -> a.equals(normalize(r.a())) && aa.equals(normalizeSub(r.a(), r.aa())));
             if (sub.isPresent()) return new Match(sub.get(), MatchLevel.SUB);
         }
-        return best(rows, div, r -> a.equals(normalize(r.a())) && normalizeSub(r.a(), r.aa()) == null)
+        return best(rows, div, floor, r -> a.equals(normalize(r.a())) && normalizeSub(r.a(), r.aa()) == null)
                 .map(r -> new Match(r, MatchLevel.MAJOR))
                 .orElse(Match.NONE);
     }
@@ -85,9 +94,10 @@ public final class LocationMatcher {
         return a == null ? b == null : a.equalsIgnoreCase(b);
     }
 
-    private static Optional<LocationMapRow> best(List<LocationMapRow> rows, String div, java.util.function.Predicate<LocationMapRow> filter) {
+    private static Optional<LocationMapRow> best(List<LocationMapRow> rows, String div, String floor, java.util.function.Predicate<LocationMapRow> filter) {
         return rows.stream().filter(filter)
                 .min(Comparator.comparingInt((LocationMapRow r) -> sameText(r.div(), div) ? 0 : 1)
+                        .thenComparingInt(r -> clean(floor) != null && sameText(r.floor(), floor) ? 0 : 1)
                         .thenComparingLong(LocationMapRow::id));
     }
 
