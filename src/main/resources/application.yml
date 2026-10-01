@@ -1,6 +1,11 @@
 server:
   port: ${SERVER_PORT:8080}
 
+drawings:
+  dir: ${DRAWINGS_DIR:C:/Users/it.production/OneDrive - MISUMI Group Inc/KVH_Fixed Asset - 2. Files/Request_PNG}
+  # dir: ${DRAWINGS_DIR:C:/Users/KVH_IT_Mem_Viet/OneDrive - MISUMI Group Inc/Request_PNG}
+  base-url: ${DRAWINGS_BASE_URL:} 
+
 spring:
   application:
     name: fixed-asset-be
