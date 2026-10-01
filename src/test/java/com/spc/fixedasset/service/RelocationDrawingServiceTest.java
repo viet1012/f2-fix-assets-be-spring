@@ -41,7 +41,7 @@ class RelocationDrawingServiceTest {
     private static RelocationHistoryRow row(String machine) {
         return new RelocationHistoryRow(1L, "RL-2026-0001", machine, "A2", "A2-3", null, "G", "pic",
                 "A15", "A15-3", null, "G", "pic", LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 6),
-                LocalDateTime.of(2026, 10, 1, 2, 30, 5), "E001", "r", "REQ_PENDING_PE", null);
+                LocalDateTime.of(2026, 10, 1, 2, 30, 5), "E001", "r", "REQ_PENDING", null);
     }
 
     private RelocationDrawingService service(String baseUrl) {

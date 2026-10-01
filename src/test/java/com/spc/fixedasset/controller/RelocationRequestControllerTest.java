@@ -38,7 +38,7 @@ class RelocationRequestControllerTest {
 
     @Test
     void createReturns201() throws Exception {
-        when(service.create(any())).thenReturn(new RelocationCreateResponse("RL-2026-0001", "REQ_PENDING_PE",
+        when(service.create(any())).thenReturn(new RelocationCreateResponse("RL-2026-0001", "REQ_PENDING",
                 List.of(new RelocationCreateResponse.Item("M1", new RelocationPosition("A2", "A2-3", null), new RelocationPosition("A15", "A15-3", null), "building")),
                 List.of("M2")));
         mvc.perform(post("/api/relocation-requests").contentType(MediaType.APPLICATION_JSON).content(BODY))
@@ -73,11 +73,11 @@ class RelocationRequestControllerTest {
 
     @Test
     void listPassesFilters() throws Exception {
-        RelocationRequestResponse r = new RelocationRequestResponse("RL-2026-0001", "REQ_PENDING_PE", "E001", "x",
+        RelocationRequestResponse r = new RelocationRequestResponse("RL-2026-0001", "REQ_PENDING", "E001", "x",
                 LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 6), LocalDateTime.of(2026, 10, 1, 9, 30),
                 new RelocationPosition("A15", "A15-3", null), "https://x.sharepoint.com/d.png", List.of());
-        when(service.list("REQ_PENDING_PE", "M1", "E001", 0, 10)).thenReturn(new RelocationRequestPage(List.of(r), 0, 10, 1));
-        mvc.perform(get("/api/relocation-requests").param("status", "REQ_PENDING_PE").param("machineCode", "M1")
+        when(service.list("REQ_PENDING", "M1", "E001", 0, 10)).thenReturn(new RelocationRequestPage(List.of(r), 0, 10, 1));
+        mvc.perform(get("/api/relocation-requests").param("status", "REQ_PENDING").param("machineCode", "M1")
                         .param("requestedBy", "E001").param("page", "0").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(1))

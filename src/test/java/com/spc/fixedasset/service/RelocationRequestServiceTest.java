@@ -96,7 +96,7 @@ class RelocationRequestServiceTest {
     void createsOneRowPerMovingMachineAndSkipsThoseAlreadyThere() {
         RelocationCreateResponse res = service.create(ok("M1", "M2"));
         assertEquals("RL-2026-0042", res.requestNo());
-        assertEquals("REQ_PENDING_PE", res.status());
+        assertEquals("REQ_PENDING", res.status());
         assertEquals(List.of("M2"), res.skipped());
         assertEquals(1, res.items().size());
         assertEquals("A2-3", res.items().get(0).from().positionAA());
@@ -114,6 +114,7 @@ class RelocationRequestServiceTest {
         assertEquals("A15", r.positionAAt());
         assertEquals("E001", r.creater());
         assertEquals("Layout", r.note());
+        assertEquals("REQ_PENDING", r.status());
         assertEquals(LocalDateTime.of(2026, 10, 1, 9, 30), r.createDate());
     }
 
@@ -133,6 +134,19 @@ class RelocationRequestServiceTest {
     void allSkippedIs400() {
         assertThrows(BadRequestException.class, () -> service.create(ok("M2")));
         verify(repo, never()).insertAll(anyList(), anyBoolean());
+    }
+
+    @Test
+    void openRequestIs409ForPendingOrApproved() {
+        when(repo.findOpenMachineCodes(anyCollection(), eq(List.of("REQ_PENDING", "REQ_APPROVED")))).thenReturn(List.of("M1"));
+        assertEquals(List.of("M1"), assertThrows(ConflictException.class, () -> service.create(ok("M1"))).codes());
+    }
+
+    @Test
+    void listAcceptsOnlyCurrentStatuses() {
+        assertThrows(BadRequestException.class, () -> service.list("REQ_PENDING_" + "PE", null, null, null, null));
+        when(repo.countRequests(any())).thenReturn(0L);
+        assertEquals(0, service.list("REQ_PENDING", null, null, null, null).total());
     }
 
     @Test
@@ -164,7 +178,7 @@ class RelocationRequestServiceTest {
     void getReturnsTheSnapshotPerMachine() {
         RelocationHistoryRow row = new RelocationHistoryRow(1L, "RL-2026-0001", "M1", "A2", "A2-3", null, "G", "P",
                 "A15", "A15-3", null, "G2", "P2", TODAY, TODAY.plusDays(3), java.time.LocalDateTime.of(2026, 10, 1, 9, 0),
-                "E001", "Layout", "REQ_PENDING_PE", null);
+                "E001", "Layout", "REQ_PENDING", null);
         when(repo.findRows(List.of("RL-2026-0001"))).thenReturn(List.of(row));
         var res = service.get("RL-2026-0001");
         assertEquals("A2-3", res.items().get(0).from().positionAA());

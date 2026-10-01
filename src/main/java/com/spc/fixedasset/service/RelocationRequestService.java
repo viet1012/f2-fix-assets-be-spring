@@ -32,10 +32,12 @@ import static com.spc.fixedasset.service.LocationMatcher.*;
 @Service
 public class RelocationRequestService {
 
-    public static final String STATUS_PREFIX = "REQ_";
-    public static final String PENDING_PE = "REQ_PENDING_PE";
+    /** Flow: REQ_PENDING -> REQ_APPROVED / REQ_REJECTED -> REQ_DONE (no PE step; ApproverPE stays null). */
+    public static final String PENDING = "REQ_PENDING";
+    public static final String APPROVED = "REQ_APPROVED";
+    public static final List<String> STATUSES = List.of(PENDING, APPROVED, "REQ_REJECTED", "REQ_DONE");
     /** A machine in one of these cannot get another request (also enforced by UX_F2FAH_OpenRequest). */
-    public static final List<String> OPEN_STATUSES = List.of(PENDING_PE, "REQ_PENDING_BOD", "REQ_APPROVED");
+    public static final List<String> OPEN_STATUSES = List.of(PENDING, APPROVED);
     /** Same values as the FE config/relocation.ts; compared trim/case-insensitively with F2_FIXED_ASSET.KindFixedAsset. */
     public static final List<String> ALLOWED_KINDS = List.of("Machinery", "Tools", "Furniture and Fixtures");
     public static final String OUTSIDE_FAC = "Outside";
@@ -99,7 +101,7 @@ public class RelocationRequestService {
             history.add(new RelocationHistoryRow(table.idIdentity() ? null : nextId++, requestNo, a.code(),
                     normalize(a.positionA()), normalizeSub(a.positionA(), a.positionAA()), normalize(a.positionAAA()), group, pic,
                     toA, toAA, null, group, pic,
-                    req.plannedMoveDate(), req.plannedDoneDate(), now, requestedBy, reason, PENDING_PE, null));
+                    req.plannedMoveDate(), req.plannedDoneDate(), now, requestedBy, reason, PENDING, null));
         }
         history.forEach(r -> checkLengths(r, table));
         try {
@@ -115,13 +117,13 @@ public class RelocationRequestService {
                         new RelocationPosition(toA, toAA, null),
                         moveType(matches.get(r.machineCode()).row(), dest)))
                 .toList();
-        return new RelocationCreateResponse(requestNo, PENDING_PE, items, skipped);
+        return new RelocationCreateResponse(requestNo, PENDING, items, skipped);
     }
 
     @Transactional(readOnly = true)
     public RelocationRequestPage list(String status, String machineCode, String requestedBy, Integer page, Integer size) {
         String st = clean(status);
-        if (st != null && !st.startsWith(STATUS_PREFIX)) throw new BadRequestException("status phải bắt đầu bằng " + STATUS_PREFIX + ".");
+        if (st != null && !STATUSES.contains(st)) throw new BadRequestException("status phải là một trong " + String.join(", ", STATUSES) + ".");
         int p = page == null ? 0 : page, s = size == null ? 20 : size;
         if (p < 0 || s < 1 || s > MAX_PAGE_SIZE) throw new BadRequestException("page ≥ 0, 1 ≤ size ≤ " + MAX_PAGE_SIZE + ".");
         Filter f = new Filter(st, clean(machineCode), clean(requestedBy));
@@ -160,7 +162,6 @@ public class RelocationRequestService {
         return List.copyOf(codes);
     }
 
-    /** MAP row of the destination (exact A/AA after normalization), preferring the lowest Id; Outside is never one. */
     /** Fac of the destination MAP row (exact A/AA, not Outside, lowest Id), or null when there is none. */
     static String destinationFac(String a, String aa, List<LocationMapRow> rows) {
         String na = normalize(a);
@@ -171,6 +172,7 @@ public class RelocationRequestService {
                 .min(Comparator.comparingLong(LocationMapRow::id)).map(LocationMapRow::fac).orElse(null);
     }
 
+    /** MAP row of the destination (exact A/AA after normalization), preferring the lowest Id; Outside is never one. */
     static LocationMapRow destination(String a, String aa, List<LocationMapRow> rows) {
         List<LocationMapRow> same = rows.stream()
                 .filter(r -> a.equals(normalize(r.a())) && Objects.equals(aa, normalizeSub(r.a(), r.aa())))
