@@ -8,8 +8,7 @@ public record RelocationCreateRequest(
         Target to,
         LocalDate plannedMoveDate,
         LocalDate plannedDoneDate,
-        String reason,
-        String requestedBy
+        String reason
 ) {
     public record Target(String positionA, String positionAA) {}
 }

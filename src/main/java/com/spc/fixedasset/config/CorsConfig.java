@@ -10,20 +10,23 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
-    @Value("${fixed-asset.cors.allowed-origins:http://localhost:5173}")
+    /** Exact origins (comma-separated) from env CORS_ALLOWED_ORIGINS; falls back to the existing property. "*" is ignored. */
+    @Value("${CORS_ALLOWED_ORIGINS:${fixed-asset.cors.allowed-origins:http://localhost:5173}}")
     private String allowedOrigins;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         String[] origins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
-                .filter(s -> !s.isEmpty())
+                .filter(s -> !s.isEmpty() && !s.contains("*"))
                 .toArray(String[]::new);
+        if (origins.length == 0) return; // same origin only (e.g. through the Vite proxy)
 
-        registry.addMapping("/**")
-        .allowedOriginPatterns(origins.length > 0 ? origins : new String[]{"*"})
+        // Session cookie must travel cross-origin: credentials on, so only explicit origins are allowed.
+        registry.addMapping("/api/**")
+        .allowedOrigins(origins)
         .allowedMethods("GET", "POST", "OPTIONS")
-        .allowedHeaders("*")
-        .allowCredentials(false);
+        .allowedHeaders("Content-Type")
+        .allowCredentials(true);
     }
 }

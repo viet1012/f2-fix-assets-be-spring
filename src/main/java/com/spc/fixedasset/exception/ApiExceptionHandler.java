@@ -2,6 +2,7 @@ package com.spc.fixedasset.exception;
 
 import com.spc.fixedasset.dto.ApiConflictResponse;
 import com.spc.fixedasset.dto.ApiErrorResponse;
+import com.spc.fixedasset.dto.TooManyAttemptsResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -17,6 +18,23 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ImportException.class)
     public ResponseEntity<ApiErrorResponse> handleImport(ImportException ex) {
         return ResponseEntity.badRequest().body(new ApiErrorResponse(ex.getMessage()));
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnauthorized(UnauthorizedException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiErrorResponse(ex.getMessage()));
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiErrorResponse> handleForbidden(ForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ApiErrorResponse(ex.getMessage()));
+    }
+
+    @ExceptionHandler(TooManyAttemptsException.class)
+    public ResponseEntity<TooManyAttemptsResponse> handleTooManyAttempts(TooManyAttemptsException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.retryAfterSeconds()))
+                .body(new TooManyAttemptsResponse(ex.getMessage(), ex.retryAfterSeconds()));
     }
 
     @ExceptionHandler(BadRequestException.class)

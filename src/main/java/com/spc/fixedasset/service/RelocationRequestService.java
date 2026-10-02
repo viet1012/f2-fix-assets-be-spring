@@ -1,5 +1,6 @@
 package com.spc.fixedasset.service;
 
+import com.spc.fixedasset.auth.HrRepository;
 import com.spc.fixedasset.dto.*;
 import com.spc.fixedasset.exception.BadRequestException;
 import com.spc.fixedasset.exception.ConflictException;
@@ -12,7 +13,10 @@ import com.spc.fixedasset.repository.LocationRepository;
 import com.spc.fixedasset.repository.RelocationRequestRepository;
 import com.spc.fixedasset.repository.RelocationRequestRepository.Filter;
 import com.spc.fixedasset.service.LocationMatcher.Match;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,23 +51,28 @@ public class RelocationRequestService {
     private final RelocationRequestRepository repository;
     private final LocationRepository locations;
     private final Clock clock;
+    private final HrRepository hr;
+    private static final Logger log = LoggerFactory.getLogger(RelocationRequestService.class);
 
     @Autowired
-    public RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations) {
-        this(repository, locations, Clock.systemDefaultZone());
+    public RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr) {
+        this(repository, locations, hr, Clock.systemDefaultZone());
     }
 
-    RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, Clock clock) {
+    RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr, Clock clock) {
         this.repository = repository;
         this.locations = locations;
+        this.hr = hr;
         this.clock = clock;
     }
 
+    /** creater: the logged-in account (session), never a value from the body. */
     @Transactional
-    public RelocationCreateResponse create(RelocationCreateRequest req) {
+    public RelocationCreateResponse create(RelocationCreateRequest req, String creater) {
         LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
         List<String> codes = validate(req, now.toLocalDate());
-        String reason = req.reason().trim(), requestedBy = req.requestedBy().trim();
+        if (clean(creater) == null) throw new BadRequestException("Thiếu tài khoản người tạo.");
+        String reason = req.reason().trim(), requestedBy = creater.trim();
 
         String toA = normalize(req.to().positionA()), toAA = normalizeSub(req.to().positionA(), req.to().positionAA());
         List<LocationMapRow> rows = locations.findMapRows();
@@ -131,7 +140,8 @@ public class RelocationRequestService {
         List<String> nos = total == 0 ? List.of() : repository.findRequestNos(f, p * s, s);
         Map<String, List<RelocationHistoryRow>> byNo = repository.findRows(nos).stream()
                 .collect(Collectors.groupingBy(RelocationHistoryRow::requestNo));
-        List<RelocationRequestResponse> items = nos.stream().filter(byNo::containsKey).map(no -> toResponse(no, byNo.get(no))).toList();
+        Map<String, String> names = requesterNames(byNo.values().stream().map(r -> r.get(0).creater()).toList());
+        List<RelocationRequestResponse> items = nos.stream().filter(byNo::containsKey).map(no -> toResponse(no, byNo.get(no), names)).toList();
         return new RelocationRequestPage(items, p, s, total);
     }
 
@@ -139,7 +149,15 @@ public class RelocationRequestService {
     public RelocationRequestResponse get(String requestNo) {
         List<RelocationHistoryRow> rows = repository.findRows(List.of(requestNo));
         if (rows.isEmpty()) throw new NotFoundException("Không tìm thấy yêu cầu di dời: " + requestNo);
-        return toResponse(requestNo, rows);
+        return toResponse(requestNo, rows, requesterNames(Collections.singletonList(rows.get(0).creater())));
+    }
+
+    /** Creater of the request (trimmed); 404 when it does not exist. */
+    @Transactional(readOnly = true)
+    public String creatorOf(String requestNo) {
+        List<RelocationHistoryRow> rows = repository.findRows(List.of(requestNo));
+        if (rows.isEmpty()) throw new NotFoundException("Không tìm thấy yêu cầu di dời: " + requestNo);
+        return clean(rows.get(0).creater());
     }
 
     /** Body checks that need no database; returns the trimmed, de-duplicated machine codes (order kept). */
@@ -155,7 +173,6 @@ public class RelocationRequestService {
         if (codes.size() > MAX_MACHINES) throw new BadRequestException("Tối đa " + MAX_MACHINES + " máy mỗi yêu cầu.");
         if (req.to() == null || normalize(req.to().positionA()) == null) throw new BadRequestException("to.positionA là bắt buộc.");
         if (clean(req.reason()) == null) throw new BadRequestException("reason là bắt buộc.");
-        if (clean(req.requestedBy()) == null) throw new BadRequestException("requestedBy là bắt buộc.");
         if (req.plannedMoveDate() == null || req.plannedDoneDate() == null) throw new BadRequestException("plannedMoveDate và plannedDoneDate là bắt buộc.");
         if (req.plannedMoveDate().isBefore(today)) throw new BadRequestException("plannedMoveDate không được trước hôm nay.");
         if (req.plannedDoneDate().isBefore(req.plannedMoveDate())) throw new BadRequestException("plannedDoneDate không được trước plannedMoveDate.");
@@ -238,7 +255,17 @@ public class RelocationRequestService {
         });
     }
 
-    private static RelocationRequestResponse toResponse(String requestNo, List<RelocationHistoryRow> rows) {
+    /** One IN query for every distinct Creater; an HR failure only leaves the names null. */
+    private Map<String, String> requesterNames(Collection<String> creaters) {
+        try {
+            return hr.findNames(creaters);
+        } catch (DataAccessException e) {
+            log.warn("Không tra được tên người yêu cầu trong F2_HR_Data ({})", e.getClass().getSimpleName());
+            return Map.of();
+        }
+    }
+
+    private static RelocationRequestResponse toResponse(String requestNo, List<RelocationHistoryRow> rows, Map<String, String> names) {
         RelocationHistoryRow first = rows.get(0);
         Set<String> statuses = rows.stream().map(RelocationHistoryRow::status).collect(Collectors.toSet());
         List<RelocationRequestResponse.Item> items = rows.stream()
@@ -246,7 +273,9 @@ public class RelocationRequestService {
                         new RelocationPosition(r.positionABf(), r.positionAABf(), r.positionAAABf()),
                         new RelocationPosition(r.positionAAt(), r.positionAAAt(), r.positionAAAAt()), r.groupBf(), r.picBf(), r.status()))
                 .toList();
-        return new RelocationRequestResponse(requestNo, statuses.size() == 1 ? first.status() : null, first.creater(), first.note(),
+        String requester = clean(first.creater());
+        return new RelocationRequestResponse(requestNo, statuses.size() == 1 ? first.status() : null, first.creater(),
+                requester == null ? null : names.get(requester), first.note(),
                 first.plannedMoveDate(), first.plannedDoneDate(), first.createDate(),
                 new RelocationPosition(first.positionAAt(), first.positionAAAt(), first.positionAAAAt()), drawingUrl(rows), items);
     }

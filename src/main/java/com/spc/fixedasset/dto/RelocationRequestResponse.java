@@ -9,6 +9,8 @@ public record RelocationRequestResponse(
         String requestNo,
         String status,
         String requestedBy,
+        /** F2_HR_Data.Name of requestedBy (Creater); null when not found. */
+        String requesterName,
         String reason,
         LocalDate plannedMoveDate,
         LocalDate plannedDoneDate,
