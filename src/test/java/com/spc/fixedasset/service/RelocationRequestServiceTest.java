@@ -93,17 +93,19 @@ class RelocationRequestServiceTest {
     }
 
     @Test
-    void requestNoIsYearAndNextSequence() {
-        assertEquals("RL-2026-0001", RelocationRequestService.requestNo(2026, null));
-        assertEquals("RL-2026-0042", RelocationRequestService.requestNo(2026, 41));
-        assertEquals("RL-2027-10000", RelocationRequestService.requestNo(2027, 9999));
+    void requestNoIsPrefixedNextSequence() {
+        assertEquals("R-0001", RelocationRequestService.requestNo(2026, null));
+        assertEquals("R-0001", RelocationRequestService.requestNo(2026, 0));
+        assertEquals("R-0002", RelocationRequestService.requestNo(2026, 1));
+        assertEquals("R-0042", RelocationRequestService.requestNo(2026, 41));
+        assertEquals("R-0124", RelocationRequestService.requestNo(2026, 123));
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void createsOneRowPerMovingMachineAndSkipsThoseAlreadyThere() {
         RelocationCreateResponse res = service.create(ok("M1", "M2"), " E001 ");
-        assertEquals("RL-2026-0042", res.requestNo());
+        assertEquals("R-0042", res.requestNo());
         assertEquals("REQ_PENDING", res.status());
         assertEquals(List.of("M2"), res.skipped());
         assertEquals(1, res.items().size());
