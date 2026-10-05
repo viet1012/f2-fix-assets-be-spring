@@ -202,7 +202,7 @@ public class RelocationRequestService {
 
     static String requestNo(int year, Integer maxSeq) {
         int next = (maxSeq == null ? 0 : maxSeq) + 1;
-        return "RL-%d-%04d".formatted(year, next);
+        return "R%04d".formatted(next);
     }
 
     /** building/floor when both MAP rows know the value and it differs; same otherwise (incl. unmatched source). */
