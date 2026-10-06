@@ -3,6 +3,7 @@ package com.spc.fixedasset.auth;
 import com.spc.fixedasset.controller.FixedAssetController;
 import com.spc.fixedasset.controller.RelocationRequestController;
 import com.spc.fixedasset.service.FixedAssetService;
+import com.spc.fixedasset.service.RelocationExcelService;
 import com.spc.fixedasset.service.RelocationRequestService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,9 @@ class AuthInterceptorTest {
 
     @MockitoBean
     private FixedAssetService fixedAssets;
+
+    @MockitoBean
+    private RelocationExcelService excel;
 
     @Test
     void apiWithoutLoginIs401AndNeverReachesTheController() throws Exception {

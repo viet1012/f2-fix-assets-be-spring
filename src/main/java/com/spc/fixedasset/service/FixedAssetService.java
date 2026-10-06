@@ -39,39 +39,8 @@ public class FixedAssetService {
 
     @Transactional(readOnly = true)
     public AssetsResponse getAssets() {
-        System.out.println("STEP 1");
-
         List<FixedAsset> rows = repository.findAll();
-
-        System.out.println("STEP 2 - rows = " + rows.size());
-
-        FixedAssetFiltersResponse filters = buildFilters(rows);
-
-        System.out.println("STEP 3 - filters OK");
-
-        LastImportResponse lastImport;
-
-        try {
-            lastImport = repository.findLastSuccessfulImport();
-            System.out.println("STEP 4 - lastImport = " + lastImport);
-        } catch (Exception e) {
-            System.err.println("ERROR AT LAST IMPORT");
-            e.printStackTrace();
-            throw e;
-        }
-
-        try {
-            AssetsResponse response =
-                    new AssetsResponse(rows, filters, lastImport);
-
-            System.out.println("STEP 5 - response created");
-
-            return response;
-        } catch (Exception e) {
-            System.err.println("ERROR CREATING RESPONSE");
-            e.printStackTrace();
-            throw e;
-        }
+        return new AssetsResponse(rows, buildFilters(rows), repository.findLastSuccessfulImport());
     }
 
     @Transactional(readOnly = true)

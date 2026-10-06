@@ -76,12 +76,21 @@ public class RelocationRequestRepository {
             """.formatted(placeholders(codes.size()),placeholders(openStatuses.size())),String.class,args.toArray());
     }
 
-    /** Highest nnnn of RL-{year}-nnnn, or null; the lock serializes concurrent creators until commit. */
-    public Integer maxRequestSeq(int year){
+    /** Highest n of the global R{n} codes (old "RL-…" codes ignored), or null; the lock serializes concurrent creators until commit. */
+    public Integer maxRequestSeq(){
         return jdbc.queryForObject("""
-            SELECT MAX(TRY_CAST(SUBSTRING(RequestNo, 9, 20) AS int)) FROM dbo.F2_FIXED_ASSET_HISTORY WITH (UPDLOCK, HOLDLOCK)
-            WHERE RequestNo LIKE ? AND %s
-            """.formatted(REQ),Integer.class,"RL-"+year+"-%");
+            SELECT MAX(TRY_CAST(SUBSTRING(RequestNo, 2, 10) AS int)) FROM dbo.F2_FIXED_ASSET_HISTORY WITH (UPDLOCK, HOLDLOCK)
+            WHERE RequestNo LIKE 'R[0-9]%%' AND %s
+            """.formatted(REQ),Integer.class);
+    }
+
+    /** FAName per MachineCode (codes without a name are absent). */
+    public Map<String,String> findMachineNames(Collection<String> codes){
+        Map<String,String> names=new HashMap<>();
+        if(codes.isEmpty())return names;
+        jdbc.query("SELECT MachineCode, FAName FROM dbo.F2_FIXED_ASSET WHERE MachineCode IN ("+placeholders(codes.size())+")",
+            rs->{if(rs.getString(2)!=null)names.put(rs.getString(1),rs.getString(2));},codes.toArray());
+        return names;
     }
 
     /** Only used when Id is not IDENTITY: every row of the table counts, not just REQ_ rows. */
@@ -133,10 +142,14 @@ public class RelocationRequestRepository {
     private static String where(Filter f,List<Object> args){
         List<String> w=new ArrayList<>(List.of(REQ,"RequestNo IS NOT NULL"));
         if(f.status()!=null){w.add("Status = ?");args.add(f.status());}
-        if(f.requestedBy()!=null){w.add("LTRIM(RTRIM(Creater)) = ?");args.add(f.requestedBy());}
+        // Old rows hold the bare account, new ones "{account}_{name}".
+        if(f.requestedBy()!=null){w.add("(LTRIM(RTRIM(Creater)) = ? OR Creater LIKE ? ESCAPE '\\')");args.add(f.requestedBy());args.add(escapeLike(f.requestedBy())+"\\_%");}
         if(f.machineCode()!=null){w.add("RequestNo IN (SELECT RequestNo FROM dbo.F2_FIXED_ASSET_HISTORY WHERE MachineCode = ? AND "+REQ+")");args.add(f.machineCode());}
         return String.join(" AND ",w);
     }
+
+    /** LIKE wildcards (% _ [) and the escape character itself taken literally, escape character '\'. */
+    static String escapeLike(String v){return v.replaceAll("([\\\\%_\\[])","\\\\$1");}
 
     private static String placeholders(int n){return String.join(",",Collections.nCopies(n,"?"));}
     private static LocalDate localDate(Date d){return d==null?null:d.toLocalDate();}

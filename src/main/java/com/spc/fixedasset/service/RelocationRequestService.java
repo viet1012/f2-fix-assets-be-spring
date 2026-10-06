@@ -15,7 +15,10 @@ import com.spc.fixedasset.repository.RelocationRequestRepository.Filter;
 import com.spc.fixedasset.service.LocationMatcher.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.spc.fixedasset.config.DrawingStorageConfig;
+import com.spc.fixedasset.storage.DrawingStorage;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -52,27 +55,32 @@ public class RelocationRequestService {
     private final LocationRepository locations;
     private final Clock clock;
     private final HrRepository hr;
+    /** Excel folder; only used to build excelUrl. */
+    private final DrawingStorage excelStorage;
     private static final Logger log = LoggerFactory.getLogger(RelocationRequestService.class);
 
     @Autowired
-    public RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr) {
-        this(repository, locations, hr, Clock.systemDefaultZone());
+    public RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr,
+                                    @Qualifier(DrawingStorageConfig.EXCEL) DrawingStorage excelStorage) {
+        this(repository, locations, hr, excelStorage, Clock.systemDefaultZone());
     }
 
-    RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr, Clock clock) {
+    RelocationRequestService(RelocationRequestRepository repository, LocationRepository locations, HrRepository hr,
+                             DrawingStorage excelStorage, Clock clock) {
         this.repository = repository;
         this.locations = locations;
         this.hr = hr;
+        this.excelStorage = excelStorage;
         this.clock = clock;
     }
 
-    /** creater: the logged-in account (session), never a value from the body. */
+    /** account/name: the logged-in session user, never values from the body; stored as Creater "{account}_{name}". */
     @Transactional
-    public RelocationCreateResponse create(RelocationCreateRequest req, String creater) {
+    public RelocationCreateResponse create(RelocationCreateRequest req, String account, String name) {
         LocalDateTime now = LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
         List<String> codes = validate(req, now.toLocalDate());
-        if (clean(creater) == null) throw new BadRequestException("Thiếu tài khoản người tạo.");
-        String reason = req.reason().trim(), requestedBy = creater.trim();
+        if (clean(account) == null) throw new BadRequestException("Thiếu tài khoản người tạo.");
+        String reason = req.reason().trim();
 
         String toA = normalize(req.to().positionA()), toAA = normalizeSub(req.to().positionA(), req.to().positionAA());
         List<LocationMapRow> rows = locations.findMapRows();
@@ -102,7 +110,8 @@ public class RelocationRequestService {
         if (moving.isEmpty()) throw new BadRequestException("Tất cả máy đã ở vị trí đích " + toZone + ".");
 
         HistoryTableInfo table = repository.tableInfo();
-        String requestNo = requestNo(now.getYear(), repository.maxRequestSeq(now.getYear()));
+        String creater = CreaterFormat.format(account, name, table.maxLengths().get("creater"));
+        String requestNo = requestNo(repository.maxRequestSeq());
         long nextId = table.idIdentity() ? 0 : repository.maxId() + 1;
         List<RelocationHistoryRow> history = new ArrayList<>();
         for (RelocationAsset a : moving) {
@@ -110,7 +119,7 @@ public class RelocationRequestService {
             history.add(new RelocationHistoryRow(table.idIdentity() ? null : nextId++, requestNo, a.code(),
                     normalize(a.positionA()), normalizeSub(a.positionA(), a.positionAA()), normalize(a.positionAAA()), group, pic,
                     toA, toAA, null, group, pic,
-                    req.plannedMoveDate(), req.plannedDoneDate(), now, requestedBy, reason, PENDING, null));
+                    req.plannedMoveDate(), req.plannedDoneDate(), now, creater, reason, PENDING, null));
         }
         history.forEach(r -> checkLengths(r, table));
         try {
@@ -135,7 +144,7 @@ public class RelocationRequestService {
         if (st != null && !STATUSES.contains(st)) throw new BadRequestException("status phải là một trong " + String.join(", ", STATUSES) + ".");
         int p = page == null ? 0 : page, s = size == null ? 20 : size;
         if (p < 0 || s < 1 || s > MAX_PAGE_SIZE) throw new BadRequestException("page ≥ 0, 1 ≤ size ≤ " + MAX_PAGE_SIZE + ".");
-        Filter f = new Filter(st, clean(machineCode), clean(requestedBy));
+        Filter f = new Filter(st, clean(machineCode), CreaterFormat.accountOf(requestedBy));
         long total = repository.countRequests(f);
         List<String> nos = total == 0 ? List.of() : repository.findRequestNos(f, p * s, s);
         Map<String, List<RelocationHistoryRow>> byNo = repository.findRows(nos).stream()
@@ -152,12 +161,12 @@ public class RelocationRequestService {
         return toResponse(requestNo, rows, requesterNames(Collections.singletonList(rows.get(0).creater())));
     }
 
-    /** Creater of the request (trimmed); 404 when it does not exist. */
+    /** Account of the creator (accountOf Creater, old and new format); 404 when the request does not exist. */
     @Transactional(readOnly = true)
     public String creatorOf(String requestNo) {
         List<RelocationHistoryRow> rows = repository.findRows(List.of(requestNo));
         if (rows.isEmpty()) throw new NotFoundException("Không tìm thấy yêu cầu di dời: " + requestNo);
-        return clean(rows.get(0).creater());
+        return CreaterFormat.accountOf(rows.get(0).creater());
     }
 
     /** Body checks that need no database; returns the trimmed, de-duplicated machine codes (order kept). */
@@ -179,14 +188,14 @@ public class RelocationRequestService {
         return List.copyOf(codes);
     }
 
-    /** Fac of the destination MAP row (exact A/AA, not Outside, lowest Id), or null when there is none. */
-    static String destinationFac(String a, String aa, List<LocationMapRow> rows) {
+    /** Destination MAP row (exact A/AA, not Outside, lowest Id), or null when there is none (never throws). */
+    static LocationMapRow destinationRow(String a, String aa, List<LocationMapRow> rows) {
         String na = normalize(a);
         if (na == null) return null;
         String naa = normalizeSub(a, aa);
         return rows.stream()
                 .filter(r -> na.equals(normalize(r.a())) && Objects.equals(naa, normalizeSub(r.a(), r.aa())) && !sameText(r.fac(), OUTSIDE_FAC))
-                .min(Comparator.comparingLong(LocationMapRow::id)).map(LocationMapRow::fac).orElse(null);
+                .min(Comparator.comparingLong(LocationMapRow::id)).orElse(null);
     }
 
     /** MAP row of the destination (exact A/AA after normalization), preferring the lowest Id; Outside is never one. */
@@ -200,9 +209,10 @@ public class RelocationRequestService {
                 .orElseThrow(() -> new BadRequestException("Không thể di dời đến vị trí Outside: " + zone));
     }
 
-    static String requestNo(int year, Integer maxSeq) {
+    /** "R" + global sequence padded to 4 digits (R0001…R9999, then R10000 uncut). */
+    static String requestNo(Integer maxSeq) {
         int next = (maxSeq == null ? 0 : maxSeq) + 1;
-        return "R-%04d".formatted(next);
+        return "R%04d".formatted(next);
     }
 
     /** building/floor when both MAP rows know the value and it differs; same otherwise (incl. unmatched source). */
@@ -255,17 +265,19 @@ public class RelocationRequestService {
         });
     }
 
-    /** One IN query for every distinct Creater; an HR failure only leaves the names null. */
+    /** HR names of the old (account-only) Creaters in one IN query; an HR failure only leaves those names null. */
     private Map<String, String> requesterNames(Collection<String> creaters) {
+        List<String> legacy = CreaterFormat.legacyAccounts(creaters);
+        if (legacy.isEmpty()) return Map.of();
         try {
-            return hr.findNames(creaters);
+            return hr.findNames(legacy);
         } catch (DataAccessException e) {
             log.warn("Không tra được tên người yêu cầu trong F2_HR_Data ({})", e.getClass().getSimpleName());
             return Map.of();
         }
     }
 
-    private static RelocationRequestResponse toResponse(String requestNo, List<RelocationHistoryRow> rows, Map<String, String> names) {
+    private RelocationRequestResponse toResponse(String requestNo, List<RelocationHistoryRow> rows, Map<String, String> names) {
         RelocationHistoryRow first = rows.get(0);
         Set<String> statuses = rows.stream().map(RelocationHistoryRow::status).collect(Collectors.toSet());
         List<RelocationRequestResponse.Item> items = rows.stream()
@@ -273,11 +285,11 @@ public class RelocationRequestService {
                         new RelocationPosition(r.positionABf(), r.positionAABf(), r.positionAAABf()),
                         new RelocationPosition(r.positionAAt(), r.positionAAAt(), r.positionAAAAt()), r.groupBf(), r.picBf(), r.status()))
                 .toList();
-        String requester = clean(first.creater());
         return new RelocationRequestResponse(requestNo, statuses.size() == 1 ? first.status() : null, first.creater(),
-                requester == null ? null : names.get(requester), first.note(),
+                CreaterFormat.accountOf(first.creater()), CreaterFormat.requesterName(first.creater(), names), first.note(),
                 first.plannedMoveDate(), first.plannedDoneDate(), first.createDate(),
-                new RelocationPosition(first.positionAAt(), first.positionAAAt(), first.positionAAAAt()), drawingUrl(rows), items);
+                new RelocationPosition(first.positionAAt(), first.positionAAAt(), first.positionAAAAt()), drawingUrl(rows),
+                excelStorage.urlOrName(RelocationExcelService.fileName(requestNo, first.createDate())), items);
     }
 
     /** Drawings as stored: webUrl, or the file name when there is no (fitting) URL. */

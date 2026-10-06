@@ -5,6 +5,8 @@ import com.spc.fixedasset.exception.BadRequestException;
 import com.spc.fixedasset.exception.NotFoundException;
 import com.spc.fixedasset.exception.ServiceUnavailableException;
 import com.spc.fixedasset.service.RelocationDrawingService;
+import com.spc.fixedasset.service.RelocationExcelService;
+import com.spc.fixedasset.storage.DrawingStorage.StoredDrawing;
 import com.spc.fixedasset.auth.LoggedInMockMvc;
 import com.spc.fixedasset.service.RelocationRequestService;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +24,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(RelocationDrawingController.class)
@@ -39,6 +42,9 @@ class RelocationDrawingControllerTest {
     @MockitoBean
     private RelocationRequestService requests;
 
+    @MockitoBean
+    private RelocationExcelService excel;
+
     @BeforeEach
     void creatorIsTheLoggedInAccount() {
         when(requests.creatorOf("RL-2026-0001")).thenReturn(" " + LoggedInMockMvc.ACCOUNT.toLowerCase() + " ");
@@ -54,10 +60,10 @@ class RelocationDrawingControllerTest {
 
     @Test
     void uploadReturns200() throws Exception {
-        when(service.upload(eq("RL-2026-0001"), any())).thenReturn(new DrawingUploadResponse("261001-093005_RL-2026-0001_Fac_B_A15-3.png", null));
+        when(service.upload(eq("RL-2026-0001"), any())).thenReturn(new DrawingUploadResponse("RL-2026-0001_261001-093005.png", null));
         mvc.perform(multipart("/api/relocation-requests/RL-2026-0001/drawing").file(FILE))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.fileName").value("261001-093005_RL-2026-0001_Fac_B_A15-3.png"));
+                .andExpect(jsonPath("$.fileName").value("RL-2026-0001_261001-093005.png"));
     }
 
     @Test
@@ -87,5 +93,21 @@ class RelocationDrawingControllerTest {
         mvc.perform(multipart("/api/relocation-requests/RL-2026-0001/drawing").file(FILE))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.error").value("Chưa cấu hình drawings.dir."));
+    }
+
+    @Test
+    void excelIsRewrittenByTheCreator() throws Exception {
+        when(excel.export("RL-2026-0001")).thenReturn(new StoredDrawing("RL-2026-0001_261001-093005.xlsx", null));
+        mvc.perform(post("/api/relocation-requests/RL-2026-0001/excel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fileName").value("RL-2026-0001_261001-093005.xlsx"));
+    }
+
+    @Test
+    void excelByOtherAccountIs403() throws Exception {
+        when(requests.creatorOf("RL-2026-0001")).thenReturn("OTHER");
+        mvc.perform(post("/api/relocation-requests/RL-2026-0001/excel"))
+                .andExpect(status().isForbidden());
+        verify(excel, never()).export(any());
     }
 }

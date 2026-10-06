@@ -60,6 +60,17 @@ class LocalFolderDrawingStorageTest {
     }
 
     @Test
+    void savesXlsxOnlyWithMatchingContentType() throws IOException {
+        Path dir = folderWithSpace();
+        LocalFolderDrawingStorage storage = new LocalFolderDrawingStorage(dir.toString(), null);
+        assertEquals("R0001_261006-091432.xlsx", storage.save("R0001_261006-091432.xlsx", new byte[]{1}, DrawingStorage.XLSX).fileName());
+        assertThrows(IllegalArgumentException.class, () -> storage.save("R0001.png", new byte[]{1}, DrawingStorage.XLSX));
+        assertThrows(IllegalArgumentException.class, () -> storage.save("R0001.xlsx", PNG));
+        assertThrows(IllegalArgumentException.class, () -> storage.save("R0001.xlsx", new byte[]{1}, "text/plain"));
+        assertEquals(1, files(dir));
+    }
+
+    @Test
     void missingOrUnusableFolderIs503() {
         assertThrows(ServiceUnavailableException.class, () -> new LocalFolderDrawingStorage(null, null).save("a.png", PNG));
         assertThrows(ServiceUnavailableException.class, () -> new LocalFolderDrawingStorage(root.resolve("nope").toString(), null).save("a.png", PNG));

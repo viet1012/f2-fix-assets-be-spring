@@ -13,6 +13,9 @@ import com.spc.fixedasset.model.RelocationAsset;
 import com.spc.fixedasset.model.RelocationHistoryRow;
 import com.spc.fixedasset.repository.LocationRepository;
 import com.spc.fixedasset.repository.RelocationRequestRepository;
+import com.spc.fixedasset.storage.DrawingStorage;
+import com.spc.fixedasset.storage.LocalFolderDrawingStorage;
+import com.spc.fixedasset.storage.LocalFolderDrawingStorage.Kind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,7 +36,8 @@ class RelocationRequestServiceTest {
     private final RelocationRequestRepository repo = mock(RelocationRequestRepository.class);
     private final LocationRepository locations = mock(LocationRepository.class);
     private final HrRepository hr = mock(HrRepository.class);
-    private final RelocationRequestService service = new RelocationRequestService(repo, locations, hr,
+    private final DrawingStorage excelStorage = mock(DrawingStorage.class);
+    private final RelocationRequestService service = new RelocationRequestService(repo, locations, hr, excelStorage,
             Clock.fixed(LocalDateTime.of(2026, 10, 1, 9, 30).atZone(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault()));
 
     private static RelocationCreateRequest req(List<String> codes, String a, String aa, LocalDate move, LocalDate done, String reason) {
@@ -58,7 +62,7 @@ class RelocationRequestServiceTest {
                 asset("M1", "Machinery", "A2", "A-2-3"), asset("M2", " tools ", "A15", "A15-3"), asset("M3", "Building", "A2", "A2-3")));
         when(repo.findOpenMachineCodes(anyCollection(), anyCollection())).thenReturn(List.of());
         when(repo.tableInfo()).thenReturn(new HistoryTableInfo(Map.of("note", 10, "creater", 50, "requestno", 20), true));
-        when(repo.maxRequestSeq(2026)).thenReturn(41);
+        when(repo.maxRequestSeq()).thenReturn(41);
     }
 
     @Test
@@ -73,39 +77,39 @@ class RelocationRequestServiceTest {
 
     @Test
     void createrComesFromTheSessionAccountAndIsRequired() {
-        assertThrows(BadRequestException.class, () -> service.create(ok("M1"), "  "));
-        assertThrows(BadRequestException.class, () -> service.create(ok("M1"), null));
+        assertThrows(BadRequestException.class, () -> service.create(ok("M1"), "  ", "x"));
+        assertThrows(BadRequestException.class, () -> service.create(ok("M1"), null, "x"));
         verify(repo, never()).insertAll(anyList(), anyBoolean());
     }
 
     @Test
     void destinationMustBeInMapAndNotOutside() {
-        assertThrows(BadRequestException.class, () -> service.create(req(List.of("M1"), "Z9", null, TODAY, TODAY, "r"), " E001 "));
-        BadRequestException outside = assertThrows(BadRequestException.class, () -> service.create(req(List.of("M1"), "Outside", null, TODAY, TODAY, "r"), " E001 "));
+        assertThrows(BadRequestException.class, () -> service.create(req(List.of("M1"), "Z9", null, TODAY, TODAY, "r"), " E001 ", " Tạ  Hoàng "));
+        BadRequestException outside = assertThrows(BadRequestException.class, () -> service.create(req(List.of("M1"), "Outside", null, TODAY, TODAY, "r"), " E001 ", " Tạ  Hoàng "));
         assertTrue(outside.getMessage().contains("Outside"));
         verify(repo, never()).insertAll(anyList(), anyBoolean());
     }
 
     @Test
     void wrongKindAndUnknownMachineAre400() {
-        assertTrue(assertThrows(BadRequestException.class, () -> service.create(ok("M1", "M3"), " E001 ")).getMessage().contains("M3"));
-        assertTrue(assertThrows(BadRequestException.class, () -> service.create(ok("M1", "M9"), " E001 ")).getMessage().contains("M9"));
+        assertTrue(assertThrows(BadRequestException.class, () -> service.create(ok("M1", "M3"), " E001 ", " Tạ  Hoàng ")).getMessage().contains("M3"));
+        assertTrue(assertThrows(BadRequestException.class, () -> service.create(ok("M1", "M9"), " E001 ", " Tạ  Hoàng ")).getMessage().contains("M9"));
     }
 
     @Test
-    void requestNoIsPrefixedNextSequence() {
-        assertEquals("R-0001", RelocationRequestService.requestNo(2026, null));
-        assertEquals("R-0001", RelocationRequestService.requestNo(2026, 0));
-        assertEquals("R-0002", RelocationRequestService.requestNo(2026, 1));
-        assertEquals("R-0042", RelocationRequestService.requestNo(2026, 41));
-        assertEquals("R-0124", RelocationRequestService.requestNo(2026, 123));
+    void requestNoIsRAndGlobalSequence() {
+        assertEquals("R0001", RelocationRequestService.requestNo(null));
+        assertEquals("R0001", RelocationRequestService.requestNo(0));
+        assertEquals("R0042", RelocationRequestService.requestNo(41));
+        assertEquals("R9999", RelocationRequestService.requestNo(9998));
+        assertEquals("R10000", RelocationRequestService.requestNo(9999));
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void createsOneRowPerMovingMachineAndSkipsThoseAlreadyThere() {
-        RelocationCreateResponse res = service.create(ok("M1", "M2"), " E001 ");
-        assertEquals("R-0042", res.requestNo());
+        RelocationCreateResponse res = service.create(ok("M1", "M2"), " E001 ", " Tạ  Hoàng ");
+        assertEquals("R0042", res.requestNo());
         assertEquals("REQ_PENDING", res.status());
         assertEquals(List.of("M2"), res.skipped());
         assertEquals(1, res.items().size());
@@ -122,7 +126,7 @@ class RelocationRequestServiceTest {
         assertEquals("Press", r.groupAt());
         assertEquals("pic@spc", r.picAt());
         assertEquals("A15", r.positionAAt());
-        assertEquals("E001", r.creater());
+        assertEquals("E001_Tạ Hoàng", r.creater());
         assertEquals("Layout", r.note());
         assertEquals("REQ_PENDING", r.status());
         assertEquals(LocalDateTime.of(2026, 10, 1, 9, 30), r.createDate());
@@ -134,7 +138,7 @@ class RelocationRequestServiceTest {
         when(repo.tableInfo()).thenReturn(new HistoryTableInfo(Map.of(), false));
         when(repo.maxId()).thenReturn(100L);
         when(repo.findAssets(anyCollection())).thenReturn(List.of(asset("M1", "Machinery", "A2", "A2-3"), asset("M4", "Tools", "A2", "A2-3")));
-        service.create(ok("M1", "M4"), " E001 ");
+        service.create(ok("M1", "M4"), " E001 ", " Tạ  Hoàng ");
         ArgumentCaptor<List<RelocationHistoryRow>> rows = ArgumentCaptor.forClass(List.class);
         verify(repo).insertAll(rows.capture(), eq(true));
         assertEquals(List.of(101L, 102L), rows.getValue().stream().map(RelocationHistoryRow::id).toList());
@@ -142,14 +146,14 @@ class RelocationRequestServiceTest {
 
     @Test
     void allSkippedIs400() {
-        assertThrows(BadRequestException.class, () -> service.create(ok("M2"), " E001 "));
+        assertThrows(BadRequestException.class, () -> service.create(ok("M2"), " E001 ", " Tạ  Hoàng "));
         verify(repo, never()).insertAll(anyList(), anyBoolean());
     }
 
     @Test
     void openRequestIs409ForPendingOrApproved() {
         when(repo.findOpenMachineCodes(anyCollection(), eq(List.of("REQ_PENDING", "REQ_APPROVED")))).thenReturn(List.of("M1"));
-        assertEquals(List.of("M1"), assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 ")).codes());
+        assertEquals(List.of("M1"), assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 ", " Tạ  Hoàng ")).codes());
     }
 
     @Test
@@ -162,16 +166,16 @@ class RelocationRequestServiceTest {
     @Test
     void openRequestIs409() {
         when(repo.findOpenMachineCodes(anyCollection(), anyCollection())).thenReturn(List.of("M1"));
-        ConflictException e = assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 "));
+        ConflictException e = assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 ", " Tạ  Hoàng "));
         assertEquals(List.of("M1"), e.codes());
-        verify(repo, never()).maxRequestSeq(anyInt());
+        verify(repo, never()).maxRequestSeq();
     }
 
     @Test
     void uniqueIndexViolationMapsTo409() {
         doThrow(new DuplicateKeyException("dup", new SQLException("Cannot insert duplicate key row", "23000", 2601)))
                 .when(repo).insertAll(anyList(), anyBoolean());
-        assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 "));
+        assertThrows(ConflictException.class, () -> service.create(ok("M1"), " E001 ", " Tạ  Hoàng "));
         assertTrue(RelocationRequestService.isUniqueViolation(new RuntimeException(new SQLException("x", "23000", 2627))));
         assertFalse(RelocationRequestService.isUniqueViolation(new RuntimeException(new SQLException("x", "23000", 547))));
     }
@@ -179,7 +183,7 @@ class RelocationRequestServiceTest {
     @Test
     void tooLongValueIs400() {
         BadRequestException e = assertThrows(BadRequestException.class,
-                () -> service.create(req(List.of("M1"), "A15", "A15-3", TODAY, TODAY, "a reason longer than ten"), " E001 "));
+                () -> service.create(req(List.of("M1"), "A15", "A15-3", TODAY, TODAY, "a reason longer than ten"), " E001 ", " Tạ  Hoàng "));
         assertTrue(e.getMessage().contains("Note"));
         verify(repo, never()).insertAll(anyList(), anyBoolean());
     }
@@ -191,11 +195,12 @@ class RelocationRequestServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void requesterNamesComeFromOneHrQuery() {
-        when(repo.countRequests(any())).thenReturn(3L);
-        when(repo.findRequestNos(any(), anyInt(), anyInt())).thenReturn(List.of("RL-1", "RL-2", "RL-3"));
-        when(repo.findRows(List.of("RL-1", "RL-2", "RL-3"))).thenReturn(List.of(
-                rowOf("RL-1", "M1", "E001"), rowOf("RL-1", "M2", "E001"), rowOf("RL-2", "M3", " e001 "), rowOf("RL-3", "M4", "E999")));
+    void requesterNamesComeFromCreaterOrOneHrQueryForOldRows() {
+        when(repo.countRequests(any())).thenReturn(4L);
+        when(repo.findRequestNos(any(), anyInt(), anyInt())).thenReturn(List.of("RL-1", "RL-2", "RL-3", "R0004"));
+        when(repo.findRows(List.of("RL-1", "RL-2", "RL-3", "R0004"))).thenReturn(List.of(
+                rowOf("RL-1", "M1", "E001"), rowOf("RL-1", "M2", "E001"), rowOf("RL-2", "M3", " e001 "), rowOf("RL-3", "M4", "E999"),
+                rowOf("R0004", "M5", "22847_Tạ Hoàng Tuấn Việt")));
         java.util.TreeMap<String, String> names = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         names.put("E001", "Nguyễn Văn A");
         when(hr.findNames(anyCollection())).thenReturn(names);
@@ -204,7 +209,11 @@ class RelocationRequestServiceTest {
         assertEquals("Nguyễn Văn A", page.items().get(0).requesterName());
         assertEquals("Nguyễn Văn A", page.items().get(1).requesterName());
         assertNull(page.items().get(2).requesterName()); // E999 not in HR
-        verify(hr, times(1)).findNames(anyCollection());
+        assertEquals("Tạ Hoàng Tuấn Việt", page.items().get(3).requesterName());
+        assertEquals("22847", page.items().get(3).requesterCode());
+        assertEquals("e001", page.items().get(1).requesterCode());
+        // Only the old (account-only) rows are looked up in HR.
+        verify(hr, times(1)).findNames(argThat(c -> c.size() == 3 && c.containsAll(List.of("E001", "e001", "E999"))));
     }
 
     @Test
@@ -235,5 +244,46 @@ class RelocationRequestServiceTest {
         assertThrows(BadRequestException.class, () -> service.list(null, null, null, 0, 1000));
         when(repo.findRows(List.of("RL-2026-9999"))).thenReturn(List.of());
         assertThrows(NotFoundException.class, () -> service.get("RL-2026-9999"));
+    }
+
+    @Test
+    void creatorOfIsTheAccountForOldAndNewCreater() {
+        when(repo.findRows(List.of("RL-1"))).thenReturn(List.of(rowOf("RL-1", "M1", " E001 ")));
+        when(repo.findRows(List.of("R0001"))).thenReturn(List.of(rowOf("R0001", "M1", "E001_Nguyễn Văn A")));
+        assertEquals("E001", service.creatorOf("RL-1"));
+        assertEquals("E001", service.creatorOf("R0001"));
+    }
+
+    @Test
+    void createrIsCutToTheColumnLength() {
+        when(repo.tableInfo()).thenReturn(new HistoryTableInfo(Map.of("creater", 12), true));
+        when(repo.maxRequestSeq()).thenReturn(0);
+        service.create(ok("M1"), "22847", "Tạ Hoàng Tuấn Việt");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<RelocationHistoryRow>> rows = ArgumentCaptor.forClass(List.class);
+        verify(repo).insertAll(rows.capture(), anyBoolean());
+        assertEquals("22847_Tạ Hoà", rows.getValue().get(0).creater());
+    }
+
+    @Test
+    void myRequestsFilterUsesTheAccount() {
+        when(repo.countRequests(any())).thenReturn(0L);
+        service.list(null, null, " 22847_Tạ Hoàng ", null, null);
+        verify(repo).countRequests(new RelocationRequestRepository.Filter(null, null, "22847"));
+    }
+
+    @Test
+    void excelUrlIsWebLinkWithBaseUrlAndFileNameWithout() {
+        when(repo.findRows(List.of("R0001"))).thenReturn(List.of(rowOf("R0001", "M1", "E001_A")));
+        String name = RelocationExcelService.fileName("R0001", LocalDateTime.of(2026, 10, 1, 9, 0));
+        Clock clock = Clock.systemDefaultZone();
+
+        RelocationRequestService withUrl = new RelocationRequestService(repo, locations, hr,
+                new LocalFolderDrawingStorage(Kind.EXCEL, null, "https://spc.sharepoint.com/sites/F2/Excel Files/"), clock);
+        assertEquals("https://spc.sharepoint.com/sites/F2/Excel Files/" + name, withUrl.get("R0001").excelUrl());
+
+        RelocationRequestService noUrl = new RelocationRequestService(repo, locations, hr,
+                new LocalFolderDrawingStorage(Kind.EXCEL, null, " "), clock);
+        assertEquals(name, noUrl.get("R0001").excelUrl());
     }
 }

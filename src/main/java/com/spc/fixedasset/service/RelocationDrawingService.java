@@ -4,43 +4,42 @@ import com.spc.fixedasset.dto.DrawingUploadResponse;
 import com.spc.fixedasset.exception.BadRequestException;
 import com.spc.fixedasset.exception.NotFoundException;
 import com.spc.fixedasset.model.RelocationHistoryRow;
-import com.spc.fixedasset.repository.LocationRepository;
 import com.spc.fixedasset.repository.RelocationRequestRepository;
 import com.spc.fixedasset.storage.DrawingStorage;
 import com.spc.fixedasset.storage.DrawingStorage.StoredDrawing;
+import com.spc.fixedasset.config.DrawingStorageConfig;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 
-/** PNG drawing of a relocation request: saved via DrawingStorage, its webUrl (or file name) kept in Drawings. */
+/** PNG drawing of a relocation request: saved via DrawingStorage, its webUrl (or file name) kept in Drawings; the Excel export is then rewritten. */
 @Service
 public class RelocationDrawingService {
 
     public static final long MAX_BYTES = 10L * 1024 * 1024;
-    static final ZoneId FILE_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
     private static final byte[] PNG_MAGIC = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
-    private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyMMdd-HHmmss");
 
     private final RelocationRequestRepository repository;
-    private final LocationRepository locations;
     private final DrawingStorage storage;
+    private final RelocationExcelService excel;
     /** Zone CreateDate was written in (the app writes LocalDateTime.now() of the JVM). */
     private final ZoneId createDateZone;
 
     @Autowired
-    public RelocationDrawingService(RelocationRequestRepository repository, LocationRepository locations, DrawingStorage storage) {
-        this(repository, locations, storage, ZoneId.systemDefault());
+    public RelocationDrawingService(RelocationRequestRepository repository, @Qualifier(DrawingStorageConfig.DRAWINGS) DrawingStorage storage,
+                                    RelocationExcelService excel) {
+        this(repository, storage, excel, ZoneId.systemDefault());
     }
 
-    RelocationDrawingService(RelocationRequestRepository repository, LocationRepository locations, DrawingStorage storage, ZoneId createDateZone) {
+    RelocationDrawingService(RelocationRequestRepository repository, DrawingStorage storage, RelocationExcelService excel, ZoneId createDateZone) {
         this.repository = repository;
-        this.locations = locations;
         this.storage = storage;
+        this.excel = excel;
         this.createDateZone = createDateZone;
     }
 
@@ -50,14 +49,11 @@ public class RelocationDrawingService {
         if (rows.isEmpty()) throw new NotFoundException("Không tìm thấy yêu cầu di dời: " + requestNo);
         validatePng(content);
 
-        RelocationHistoryRow first = rows.get(0);
-        String fac = RelocationRequestService.destinationFac(first.positionAAt(), first.positionAAAt(), locations.findMapRows());
-        String area = first.positionAAAt() != null ? first.positionAAAt() : first.positionAAt();
-        String name = fileName(first.createDate(), createDateZone, requestNo, fac, area);
+        String name = RelocationFileNames.baseName(requestNo, rows.get(0).createDate(), createDateZone) + ".png";
 
         StoredDrawing stored;
         try {
-            stored = storage.save(name, content);
+            stored = storage.save(name, content, DrawingStorage.PNG);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage());
         }
@@ -65,6 +61,8 @@ public class RelocationDrawingService {
         String url = stored.webUrl();
         String value = url != null && (max == null || max < 0 || url.length() <= max) ? url : stored.fileName();
         repository.updateDrawings(requestNo, value);
+        // DrawingFile column of the export; a failure is only logged, the drawing is already saved.
+        excel.tryExport(requestNo);
         return new DrawingUploadResponse(stored.fileName(), url);
     }
 
@@ -74,18 +72,5 @@ public class RelocationDrawingService {
         if (content.length < PNG_MAGIC.length || !Arrays.equals(Arrays.copyOf(content, PNG_MAGIC.length), PNG_MAGIC)) {
             throw new BadRequestException("Bản vẽ phải là file PNG.");
         }
-    }
-
-    /** yyMMdd-HHmmss_{RequestNo}_{Fac}_{Area}.png, time in Asia/Ho_Chi_Minh; missing parts become "NA". */
-    static String fileName(LocalDateTime createDate, ZoneId createDateZone, String requestNo, String fac, String area) {
-        String stamp = createDate.atZone(createDateZone).withZoneSameInstant(FILE_ZONE).format(STAMP);
-        return stamp + "_" + part(requestNo) + "_" + part(fac) + "_" + part(area) + ".png";
-    }
-
-    /** Windows/OneDrive reserved characters (\ / : * ? " < > | # %), controls and whitespace become "-"; no leading/trailing dots. */
-    static String part(String v) {
-        if (v == null || v.isBlank()) return "NA";
-        String s = v.trim().replaceAll("[\\\\/:*?\"<>|#%\\p{Cntrl}\\s]", "-").replaceAll("^\\.+|\\.+$", "");
-        return s.isEmpty() ? "NA" : s;
     }
 }
